@@ -29,7 +29,7 @@ common/                 shared IZLR and I/O headers
 parser/                 IZML lexer, parser, semantic analysis and C API
 compiler/               izmlc and the IZRC writer
 generator/              izmlgenc template engine and language-config loader
-runtime/                native IZRC runtime and language wrappers
+runtime/                native IZRC runtime (C ABI and C++ header)
 data/izmlgen/           required .izmlgen-lang configuration files
 licenses/               MINT license texts
 ```
