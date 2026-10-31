@@ -1,0 +1,300 @@
+@izmlgen-lang lang="python3" version="1.0"
+
+[config]
+ident_sep = "."
+escape_non_ascii = "0"
+keyword_prefix = "_"
+runtime_binary = "izml-runtime.dll"
+
+[types]
+bool = bool
+byte = int
+sbyte = int
+short = int
+ushort = int
+int = int
+uint = int
+long = int
+ulong = int
+float = float
+double = float
+string = str
+
+[readers]
+bool = read_bool
+byte = read_u8
+sbyte = read_i8
+short = read_i16
+ushort = read_u16
+int = read_i32
+uint = read_u32
+long = read_i64
+ulong = read_u64
+float = read_f32
+double = read_f64
+string = read_string
+
+[keywords]
+False = ""
+None = ""
+True = ""
+and = ""
+as = ""
+assert = ""
+async = ""
+await = ""
+break = ""
+class = ""
+continue = ""
+def = ""
+del = ""
+elif = ""
+else = ""
+except = ""
+finally = ""
+for = ""
+from = ""
+global = ""
+if = ""
+import = ""
+in = ""
+is = ""
+lambda = ""
+nonlocal = ""
+not = ""
+or = ""
+pass = ""
+raise = ""
+return = ""
+try = ""
+while = ""
+with = ""
+yield = ""
+
+[macros]
+{% macro base_type(field) %}{% if field.kind == "list" %}List[{{ element_type(field) }}]{% elif field.kind == "define" %}{{ qual(field.type_name) }}{% elif field.kind == "enum" %}{{ field.type_name }}{% else %}{{ type(field.kind) }}{% endif %}{% endmacro %}
+{% macro element_type(field) %}{% if field.element_kind == "define" %}{{ qual(field.element_name) }}{% elif field.element_kind == "enum" %}{{ field.element_name }}{% else %}{{ type(field.element_kind) }}{% endif %}{% endmacro %}
+{% macro default_value(field) %}{% if field.kind == "string" %}""{% elif field.kind == "list" %}[]{% elif field.kind == "define" %}{{ qual(field.type_name) }}(){% elif field.kind == "bool" %}False{% elif field.kind == "float" or field.kind == "double" %}0.0{% elif field.kind == "enum" %}None{% else %}0{% endif %}{% endmacro %}
+{% macro emit_enum(e) %}
+class {{ e.name }}(IntEnum):
+{% for m in e.members %}    {{ kw(m.name) }} = {{ m.value }}
+{% endfor %}
+
+{% endmacro %}
+{% macro emit_type(def, depth) %}
+{{ pad(depth * 4) }}class {{ def.name }}{% if def.base_name %}({{ qual(def.base_name) }}){% endif %}:
+{% for nested in def.nested_defines %}{{ emit_type(nested, depth + 1) }}
+{% endfor %}{{ pad((depth + 1) * 4) }}def __init__(self):
+{% if def.base_name %}{{ pad(depth * 4 + 8) }}super().__init__()
+{% endif %}{% for field in def.fields %}
+{{ pad(depth * 4 + 8) }}self.{{ kw(field.name) }} = {% if field.optional %}None{% else %}{{ default_value(field) }}{% endif %}
+{% endfor %}
+
+{% endmacro %}
+{% macro emit_read_field(field, id) %}
+{% if field.optional %}{% set target = "temp" + id %}{% else %}{% set target = "value." + kw(field.name) %}{% endif %}
+{% if field.optional %}
+    {{ target }} = {% if field.kind == "list" %}[]{% elif field.kind == "define" %}{{ qual(field.type_name) }}(){% else %}None{% endif %}
+{% endif %}
+{% if field.kind == "list" %}    count{{ id }} = reader.read_u32()
+    {{ target }}.clear()
+    for i{{ id }} in range(count{{ id }}):
+{% if field.element_kind == "define" %}        item{{ id }} = {{ qual(field.element_name) }}()
+        read_{{ ident(field.element_name) }}(reader, item{{ id }})
+        {{ target }}.append(item{{ id }})
+{% elif field.element_kind == "enum" %}        {{ target }}.append({{ field.element_name }}(reader.{{ reader(field.element_enum_base_kind) }}()))
+{% else %}        {{ target }}.append(reader.{{ reader(field.element_kind) }}())
+{% endif %}{% elif field.kind == "define" %}    read_{{ ident(field.type_name) }}(reader, {{ target }})
+{% elif field.kind == "enum" %}    {{ target }} = {{ field.type_name }}(reader.{{ reader(field.enum_base_kind) }}())
+{% else %}    {{ target }} = reader.{{ reader(field.kind) }}()
+{% endif %}
+{% if field.optional %}    if (bitmap{{ field.bitmap_byte }} >> {{ field.bitmap_bit }}) & 1:
+        value.{{ kw(field.name) }} = {{ target }}
+{% endif %}
+{% endmacro %}
+{% macro emit_read_func(def) %}
+def read_{{ ident(def.qualified) }}(reader, value):
+{% for b in range(def.bitmap_bytes) %}    bitmap{{ b }} = reader.read_u8()
+{% endfor %}{% for field in def.layout %}{{ emit_read_field(field, loop.index0) }}{% endfor %}
+
+{% endmacro %}
+{% macro emit_read_funcs(def) %}
+{% for nested in def.nested_defines %}{{ emit_read_funcs(nested) }}{% endfor %}
+{{ emit_read_func(def) }}
+{% endmacro %}
+{% macro emit_tables() %}
+INSTANCES = [
+{% for instance in program.instances %}    {"name": "{{ escape(instance.name) }}", "type_tag": {{ instance.type_tag }}, "root_index": {{ instance.root_index }}},
+{% endfor %}]
+
+LIST_VIEWS = [
+{% for view in program.list_views %}    {"name": "{{ escape(view.name) }}", "element_tag": {{ view.element_tag }}},
+{% endfor %}]
+
+{% endmacro %}
+{% macro emit_load_roots() %}
+def load_roots(archive):
+    roots = []
+    for _ in range(archive.root_count):
+        tag = archive.read_i32()
+{% if len(program.top_level_defines) == 0 %}        raise RuntimeError("unknown typeTag")
+{% else %}{% for def in program.top_level_defines %}        {% if loop.first %}if{% else %}elif{% endif %} tag == {{ def.type_tag }}:
+            value = {{ qual(def.qualified) }}()
+            read_{{ ident(def.qualified) }}(archive, value)
+            roots.append(value)
+{% endfor %}        else:
+            raise RuntimeError("unknown typeTag")
+{% endif %}    return roots
+{% endmacro %}
+[/macros]
+
+[template:main]
+file = "izml_generated.py"
+from __future__ import annotations
+
+from enum import IntEnum
+from typing import Any, List, Optional
+
+from izml_runtime import Archive
+
+{% for enum in program.enums %}{{ emit_enum(enum) }}{% endfor %}
+{% for define in program.top_level_defines %}{{ emit_type(define, 0) }}{% endfor %}
+{% for define in program.top_level_defines %}{{ emit_read_funcs(define) }}{% endfor %}
+{{ emit_tables() }}
+{{ emit_load_roots() }}
+[/template]
+
+[runtime]
+file = "izml_runtime.py"
+import ctypes
+import os
+
+_LIB_NAME = "izml-runtime.dll"
+_LOCAL = os.path.join(os.path.dirname(os.path.abspath(__file__)), _LIB_NAME)
+_LIB = ctypes.CDLL(_LOCAL if os.path.exists(_LOCAL) else _LIB_NAME)
+
+_LIB.izmlrt_open.argtypes = [ctypes.c_char_p]
+_LIB.izmlrt_open.restype = ctypes.c_void_p
+_LIB.izmlrt_close.argtypes = [ctypes.c_void_p]
+_LIB.izmlrt_close.restype = None
+_LIB.izmlrt_version.argtypes = [ctypes.c_void_p]
+_LIB.izmlrt_version.restype = ctypes.c_uint16
+_LIB.izmlrt_min_version.argtypes = [ctypes.c_void_p]
+_LIB.izmlrt_min_version.restype = ctypes.c_uint16
+_LIB.izmlrt_root_count.argtypes = [ctypes.c_void_p]
+_LIB.izmlrt_root_count.restype = ctypes.c_uint32
+_LIB.izmlrt_last_error.argtypes = []
+_LIB.izmlrt_last_error.restype = ctypes.c_char_p
+
+_READERS = {
+    "read_u8": ctypes.c_uint8,
+    "read_i8": ctypes.c_int8,
+    "read_u16": ctypes.c_uint16,
+    "read_i16": ctypes.c_int16,
+    "read_u32": ctypes.c_uint32,
+    "read_i32": ctypes.c_int32,
+    "read_u64": ctypes.c_uint64,
+    "read_i64": ctypes.c_int64,
+    "read_f32": ctypes.c_float,
+    "read_f64": ctypes.c_double,
+    "read_bool": ctypes.c_int32,
+}
+
+for _name, _ctype in _READERS.items():
+    _fn = getattr(_LIB, "izmlrt_" + _name)
+    _fn.argtypes = [ctypes.c_void_p, ctypes.POINTER(_ctype)]
+    _fn.restype = ctypes.c_int32
+
+_LIB.izmlrt_read_string.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_uint32)]
+_LIB.izmlrt_read_string.restype = ctypes.c_int32
+_LIB.izmlrt_read_bytes.argtypes = [ctypes.c_void_p, ctypes.POINTER(ctypes.c_void_p), ctypes.POINTER(ctypes.c_uint32)]
+_LIB.izmlrt_read_bytes.restype = ctypes.c_int32
+
+
+def _last_error():
+    text = _LIB.izmlrt_last_error()
+    return text.decode("utf-8") if text else "unknown IZML runtime error"
+
+
+class Archive:
+    def __init__(self, path):
+        self._handle = _LIB.izmlrt_open(path.encode("utf-8"))
+        if not self._handle:
+            raise RuntimeError(_last_error())
+
+    def close(self):
+        if self._handle:
+            _LIB.izmlrt_close(self._handle)
+            self._handle = None
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        self.close()
+
+    @property
+    def version(self):
+        return _LIB.izmlrt_version(self._handle)
+
+    @property
+    def min_version(self):
+        return _LIB.izmlrt_min_version(self._handle)
+
+    @property
+    def root_count(self):
+        return _LIB.izmlrt_root_count(self._handle)
+
+    def _read(self, name):
+        value = _READERS[name]()
+        if getattr(_LIB, "izmlrt_" + name)(self._handle, ctypes.byref(value)) == 0:
+            raise RuntimeError(_last_error())
+        return value.value
+
+    def read_u8(self):
+        return self._read("read_u8")
+
+    def read_i8(self):
+        return self._read("read_i8")
+
+    def read_u16(self):
+        return self._read("read_u16")
+
+    def read_i16(self):
+        return self._read("read_i16")
+
+    def read_u32(self):
+        return self._read("read_u32")
+
+    def read_i32(self):
+        return self._read("read_i32")
+
+    def read_u64(self):
+        return self._read("read_u64")
+
+    def read_i64(self):
+        return self._read("read_i64")
+
+    def read_f32(self):
+        return self._read("read_f32")
+
+    def read_f64(self):
+        return self._read("read_f64")
+
+    def read_bool(self):
+        return bool(self._read("read_bool"))
+
+    def read_string(self):
+        data = ctypes.c_void_p()
+        length = ctypes.c_uint32()
+        if _LIB.izmlrt_read_string(self._handle, ctypes.byref(data), ctypes.byref(length)) == 0:
+            raise RuntimeError(_last_error())
+        return ctypes.string_at(data.value, length.value).decode("utf-8")
+
+    def read_bytes(self):
+        data = ctypes.c_void_p()
+        length = ctypes.c_uint32()
+        if _LIB.izmlrt_read_bytes(self._handle, ctypes.byref(data), ctypes.byref(length)) == 0:
+            raise RuntimeError(_last_error())
+        return ctypes.string_at(data.value, length.value)
+[/runtime]

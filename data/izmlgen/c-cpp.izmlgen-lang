@@ -1,0 +1,551 @@
+@izmlgen-lang lang="c-cpp" version="1.0"
+
+[config]
+namespace = "izmlgen"
+ident_sep = "::"
+escape_non_ascii = "1"
+keyword_prefix = "@"
+
+[types]
+bool = bool
+byte = Byte
+sbyte = Int8
+short = Int16
+ushort = UInt16
+int = Int32
+uint = UInt32
+long = Int64
+ulong = UInt64
+float = Float32
+double = Float64
+string = String
+
+[readers]
+bool = boolean
+byte = u8
+sbyte = i8
+short = i16
+ushort = u16
+int = i32
+uint = u32
+long = i64
+ulong = u64
+float = f32
+double = f64
+string = string
+
+[macros]
+{% macro base_type(field) %}{% if field.kind == "list" %}std::vector<{{ element_type(field) }}>{% elif field.kind == "define" %}{{ qual(field.type_name) }}{% elif field.kind == "enum" %}{{ field.type_name }}{% else %}{{ type(field.kind) }}{% endif %}{% endmacro %}
+{% macro element_type(field) %}{% if field.element_kind == "define" %}{{ qual(field.element_name) }}{% elif field.element_kind == "enum" %}{{ field.element_name }}{% else %}{{ type(field.element_kind) }}{% endif %}{% endmacro %}
+{% macro field_type(field) %}{% if field.optional %}std::optional<{{ base_type(field) }}>{% else %}{{ base_type(field) }}{% endif %}{% endmacro %}
+{% macro descriptor(kind) %}{% if kind == "bool" %}Bool{% elif kind == "byte" %}UInt8{% elif kind == "sbyte" %}Int8{% elif kind == "short" %}Int16{% elif kind == "ushort" %}UInt16{% elif kind == "int" %}Int32{% elif kind == "uint" %}UInt32{% elif kind == "long" %}Int64{% elif kind == "ulong" %}UInt64{% elif kind == "float" %}Float32{% elif kind == "double" %}Float64{% elif kind == "string" %}String{% elif kind == "enum" %}Enum{% elif kind == "define" %}Define{% else %}List{% endif %}{% endmacro %}
+{% macro emit_enum(e) %}
+    enum class {{ e.name }} : {{ type(e.base_kind) }}
+    {
+{% for m in e.members %}        {{ m.name }} = {{ m.value }},
+{% endfor %}    };
+
+{% endmacro %}
+{% macro emit_struct(def, depth) %}
+{{ pad(depth * 4) }}struct {{ def.name }}{% if def.base_name %} : {{ qual(def.base_name) }}{% endif %}
+{{ pad(depth * 4) }}{
+{% for nested in def.nested_defines %}{{ emit_struct(nested, depth + 1) }}
+{% endfor %}{% for field in def.fields %}{{ pad((depth + 1) * 4) }}{{ field_type(field) }} {{ field.name }}{};
+{% endfor %}{{ pad(depth * 4) }}};
+{% if def.has_nested %}
+
+{% endif %}
+{% endmacro %}
+{% macro emit_top_level(def, depth) %}
+{{ emit_struct(def, depth) }}
+
+{% endmacro %}
+{% macro emit_read_decl(def) %}
+{% for nested in def.nested_defines %}{{ emit_read_decl(nested) }}{% endfor %}
+    void read_{{ ident(def.qualified) }}(Reader& reader, {{ qual(def.qualified) }}& value);
+{% endmacro %}
+{% macro emit_read_field(field, id) %}
+{% if field.optional %}{% set target = "temp" + id %}{% else %}{% set target = "value." + field.name %}{% endif %}
+{% if field.optional %}        {{ base_type(field) }} {{ target }}{};
+{% endif %}
+{% if field.kind == "list" %}        UInt32 count{{ id }} = reader.u32();
+        {{ target }}.clear();
+        {{ target }}.resize(count{{ id }});
+        for (UInt32 i{{ id }} = 0; i{{ id }} < count{{ id }}; ++i{{ id }})
+        {
+{% if field.element_kind == "define" %}            read_{{ ident(field.element_name) }}(reader, {{ target }}[i{{ id }}]);
+{% elif field.element_kind == "enum" %}            {{ target }}[i{{ id }}] = static_cast<{{ field.element_name }}>(reader.{{ reader(field.element_enum_base_kind) }}());
+{% else %}            {{ target }}[i{{ id }}] = reader.{{ reader(field.element_kind) }}();
+{% endif %}        }
+{% elif field.kind == "define" %}        read_{{ ident(field.type_name) }}(reader, {{ target }});
+{% elif field.kind == "enum" %}        {{ target }} = static_cast<{{ field.type_name }}>(reader.{{ reader(field.enum_base_kind) }}());
+{% else %}        {{ target }} = reader.{{ reader(field.kind) }}();
+{% endif %}
+{% if field.optional %}        if (((bitmap{{ field.bitmap_byte }} >> {{ field.bitmap_bit }}u) & 1u) != 0)
+        {
+            value.{{ field.name }} = {{ target }};
+        }
+{% endif %}
+{% endmacro %}
+{% macro emit_read_func(def) %}
+    void read_{{ ident(def.qualified) }}(Reader& reader, {{ qual(def.qualified) }}& value)
+    {
+{% for b in range(def.bitmap_bytes) %}        Byte bitmap{{ b }} = reader.u8();
+{% endfor %}{% for field in def.layout %}{{ emit_read_field(field, loop.index0) }}{% endfor %}    }
+
+{% endmacro %}
+{% macro emit_read_funcs(def) %}
+{% for nested in def.nested_defines %}{{ emit_read_funcs(nested) }}{% endfor %}
+{{ emit_read_func(def) }}
+{% endmacro %}
+{% macro emit_instances() %}
+{% if program.instance_count == 0 %}    const izml::InstanceDesc* kInstances = nullptr;
+{% else %}    static const izml::InstanceDesc kInstanceStorage[] =
+    {
+{% for instance in program.instances %}        { "{{ escape(instance.name) }}", {{ instance.type_tag }}, {{ instance.root_index }} },
+{% endfor %}    };
+    const izml::InstanceDesc* kInstances = kInstanceStorage;
+{% endif %}    const izml::UInt32 kInstanceCount = {{ program.instance_count }};
+{% if program.list_view_count == 0 %}    const izml::ListViewDesc* kListViews = nullptr;
+{% else %}    static const izml::ListViewDesc kListViewStorage[] =
+    {
+{% for view in program.list_views %}        { "{{ escape(view.name) }}", {{ view.element_tag }} },
+{% endfor %}    };
+    const izml::ListViewDesc* kListViews = kListViewStorage;
+{% endif %}    const izml::UInt32 kListViewCount = {{ program.list_view_count }};
+
+{% endmacro %}
+{% macro emit_layouts() %}
+{% for def in program.layout_defines %}    static const izml::FieldDescriptor kFields{{ def.type_tag }}[] =
+    {
+{% for field in def.layout %}        { izml::FieldKind::{{ descriptor(field.kind) }}, {{ field.size }}u, {% if field.optional %}1{% else %}0{% endif %}u },
+{% endfor %}    };
+{% endfor %}
+
+{% if len(program.top_level_defines) == 0 %}    const izml::TemplateLayout* find_layout(izml::Int32 typeTag)
+    {
+        (void)typeTag;
+        return nullptr;
+    }
+
+{% else %}    static const izml::TemplateLayout kLayouts[] =
+    {
+{% for def in program.top_level_defines %}        { {{ def.type_tag }}, {{ len(def.layout) }}u, {{ def.optional_count }}u, {% if len(def.layout) == 0 %}nullptr{% else %}kFields{{ def.type_tag }}{% endif %} },
+{% endfor %}    };
+
+    const izml::TemplateLayout* find_layout(izml::Int32 typeTag)
+    {
+        for (const izml::TemplateLayout& layout : kLayouts)
+        {
+            if (layout.typeTag == typeTag)
+            {
+                return &layout;
+            }
+        }
+        return nullptr;
+    }
+
+{% endif %}{% endmacro %}
+{% macro emit_load_roots() %}
+    std::vector<Root> load_roots(izml::Archive& archive)
+    {
+        std::vector<Root> roots;
+        roots.reserve(archive.root_count());
+        Reader& reader = archive.reader();
+        for (UInt32 index = 0; index < archive.root_count(); ++index)
+        {
+            const Int32 typeTag = reader.i32();
+            switch (typeTag)
+            {
+{% for def in program.top_level_defines %}            case {{ def.type_tag }}:
+            {
+                {{ qual(def.qualified) }} value{};
+                read_{{ ident(def.qualified) }}(reader, value);
+                roots.emplace_back(std::move(value));
+                break;
+            }
+{% endfor %}            default:
+                throw izml::Error("unknown typeTag");
+            }
+        }
+        return roots;
+    }
+{% endmacro %}
+[/macros]
+
+[template:header]
+file = "izml_generated.hpp"
+#pragma once
+
+#include <optional>
+#include <string>
+#include <utility>
+#include <variant>
+#include <vector>
+
+#include "izml_core.hpp"
+
+namespace {{ config.namespace }}
+{
+    using izml::Byte;
+    using izml::Int8;
+    using izml::Int16;
+    using izml::Int32;
+    using izml::Int64;
+    using izml::UInt8;
+    using izml::UInt16;
+    using izml::UInt32;
+    using izml::UInt64;
+    using izml::Float32;
+    using izml::Float64;
+    using izml::String;
+    using izml::Reader;
+
+{% for enum in program.enums %}{{ emit_enum(enum) }}{% endfor %}
+{% for define in program.top_level_defines %}{{ emit_top_level(define, 1) }}{% endfor %}
+
+{% for define in program.top_level_defines %}{{ emit_read_decl(define) }}{% endfor %}
+
+    extern const izml::InstanceDesc* kInstances;
+    extern const izml::UInt32 kInstanceCount;
+    extern const izml::ListViewDesc* kListViews;
+    extern const izml::UInt32 kListViewCount;
+
+    const izml::TemplateLayout* find_layout(izml::Int32 typeTag);
+
+{% if len(program.top_level_defines) > 0 %}    using Root = std::variant<{% for define in program.top_level_defines %}{% if loop.first == false %}, {% endif %}{{ define.name }}{% endfor %}>;
+
+    std::vector<Root> load_roots(izml::Archive& archive);
+{% endif %}}
+[/template]
+
+[template:source]
+file = "izml_generated.cpp"
+#include "izml_generated.hpp"
+
+namespace {{ config.namespace }}
+{
+{% for define in program.top_level_defines %}{{ emit_read_funcs(define) }}{% endfor %}{{ emit_instances() }}{{ emit_layouts() }}{% if len(program.top_level_defines) > 0 %}{{ emit_load_roots() }}{% endif %}}
+[/template]
+
+[runtime]
+file = "izml_core.hpp"
+
+#ifndef IZML_CORE_HPP
+#define IZML_CORE_HPP
+
+#include <cstdint>
+#include <cstring>
+#include <fstream>
+#include <stdexcept>
+#include <string>
+#include <type_traits>
+#include <vector>
+
+namespace izml
+{
+    using Int8 = std::int8_t;
+    using Int16 = std::int16_t;
+    using Int32 = std::int32_t;
+    using Int64 = std::int64_t;
+    using UInt8 = std::uint8_t;
+    using UInt16 = std::uint16_t;
+    using UInt32 = std::uint32_t;
+    using UInt64 = std::uint64_t;
+    using Byte = std::uint8_t;
+    using Float32 = float;
+    using Float64 = double;
+    using String = std::string;
+    using Bytes = std::vector<Byte>;
+
+    class Error : public std::runtime_error
+    {
+    public:
+        explicit Error(const String& message) : std::runtime_error(message)
+        {
+        }
+    };
+
+    class Reader
+    {
+    public:
+        Reader() = default;
+
+        Reader(const Byte* data, std::size_t size) : data_(data), size_(size)
+        {
+        }
+
+        std::size_t position() const
+        {
+            return position_;
+        }
+
+        std::size_t size() const
+        {
+            return size_;
+        }
+
+        bool at_end() const
+        {
+            return position_ >= size_;
+        }
+
+        const Byte* current() const
+        {
+            return data_ + position_;
+        }
+
+        void skip(std::size_t count)
+        {
+            need(count);
+            position_ += count;
+        }
+
+        Byte u8()
+        {
+            return read_le<Byte>();
+        }
+
+        Int8 i8()
+        {
+            return static_cast<Int8>(read_le<Byte>());
+        }
+
+        UInt16 u16()
+        {
+            return read_le<UInt16>();
+        }
+
+        Int16 i16()
+        {
+            return static_cast<Int16>(read_le<UInt16>());
+        }
+
+        UInt32 u32()
+        {
+            return read_le<UInt32>();
+        }
+
+        Int32 i32()
+        {
+            return static_cast<Int32>(read_le<UInt32>());
+        }
+
+        UInt64 u64()
+        {
+            return read_le<UInt64>();
+        }
+
+        Int64 i64()
+        {
+            return static_cast<Int64>(read_le<UInt64>());
+        }
+
+        Float32 f32()
+        {
+            const UInt32 bits = read_le<UInt32>();
+            Float32 value = 0.0f;
+            std::memcpy(&value, &bits, sizeof(value));
+            return value;
+        }
+
+        Float64 f64()
+        {
+            const UInt64 bits = read_le<UInt64>();
+            Float64 value = 0.0;
+            std::memcpy(&value, &bits, sizeof(value));
+            return value;
+        }
+
+        bool boolean()
+        {
+            return read_le<Byte>() != 0;
+        }
+
+        String string()
+        {
+            const UInt32 length = read_le<UInt32>();
+            need(length);
+            String value(reinterpret_cast<const char*>(data_ + position_), length);
+            position_ += length;
+            return value;
+        }
+
+        Bytes bytes()
+        {
+            const UInt32 length = read_le<UInt32>();
+            need(length);
+            Bytes value(data_ + position_, data_ + position_ + length);
+            position_ += length;
+            return value;
+        }
+
+    private:
+        void need(std::size_t count)
+        {
+            if (data_ == nullptr || count > size_ - position_)
+            {
+                throw Error("truncated IZRC data");
+            }
+        }
+
+        template <typename T>
+        T read_le()
+        {
+            using U = std::conditional_t<std::is_signed_v<T>, std::make_unsigned_t<T>, T>;
+            need(sizeof(T));
+            U value = 0;
+            for (std::size_t i = 0; i < sizeof(T); ++i)
+            {
+                value |= static_cast<U>(static_cast<U>(data_[position_ + i]) << (8 * i));
+            }
+            position_ += sizeof(T);
+            return static_cast<T>(value);
+        }
+
+        const Byte* data_ = nullptr;
+        std::size_t size_ = 0;
+        std::size_t position_ = 0;
+    };
+
+    class Archive
+    {
+    public:
+        Archive() = default;
+        Archive(const Archive&) = delete;
+        Archive& operator=(const Archive&) = delete;
+        Archive(Archive&&) = default;
+        Archive& operator=(Archive&&) = default;
+
+        static Archive from_file(const String& path)
+        {
+            std::ifstream stream(path, std::ios::binary);
+            if (!stream)
+            {
+                throw Error("unable to open '" + path + "'");
+            }
+            Bytes bytes;
+            char buffer[4096];
+            while (stream.read(buffer, sizeof(buffer)) || stream.gcount() != 0)
+            {
+                bytes.insert(bytes.end(), buffer, buffer + stream.gcount());
+            }
+            return load(bytes);
+        }
+
+        static Archive load(const Bytes& bytes)
+        {
+            Archive archive;
+            archive.owned_ = bytes;
+            archive.init();
+            return archive;
+        }
+
+        UInt16 version() const
+        {
+            return version_;
+        }
+
+        UInt16 min_version() const
+        {
+            return min_version_;
+        }
+
+        UInt32 root_count() const
+        {
+            return root_count_;
+        }
+
+        Reader& reader()
+        {
+            return reader_;
+        }
+
+        const Reader& reader() const
+        {
+            return reader_;
+        }
+
+        const Bytes& bytes() const
+        {
+            return owned_;
+        }
+
+    private:
+        void init()
+        {
+            if (owned_.size() < 16)
+            {
+                throw Error("IZRC file is shorter than the 16-byte header");
+            }
+            if (std::memcmp(owned_.data(), "IZRC", 4) != 0)
+            {
+                throw Error("invalid IZRC magic");
+            }
+            version_ = static_cast<UInt16>(owned_[4] | (owned_[5] << 8));
+            min_version_ = static_cast<UInt16>(owned_[6] | (owned_[7] << 8));
+            root_count_ = static_cast<UInt32>(owned_[8] | (owned_[9] << 8) | (owned_[10] << 16) | (static_cast<UInt32>(owned_[11]) << 24));
+            if (version_ != 1)
+            {
+                throw Error("unsupported IZRC version " + std::to_string(version_));
+            }
+            reader_ = Reader(owned_.data() + 16, owned_.size() - 16);
+        }
+
+        Bytes owned_;
+        Reader reader_;
+        UInt16 version_ = 0;
+        UInt16 min_version_ = 0;
+        UInt32 root_count_ = 0;
+    };
+
+    enum class FieldKind : Byte
+    {
+        Bool,
+        Int8,
+        UInt8,
+        Int16,
+        UInt16,
+        Int32,
+        UInt32,
+        Int64,
+        UInt64,
+        Float32,
+        Float64,
+        String,
+        Enum,
+        Define,
+        List
+    };
+
+    struct FieldDescriptor
+    {
+        FieldKind kind;
+        Byte size;
+        Byte isOptional;
+    };
+
+    struct TemplateLayout
+    {
+        Int32 typeTag;
+        UInt32 fieldCount;
+        UInt32 optionalCount;
+        const FieldDescriptor* fields;
+    };
+
+    struct InstanceDesc
+    {
+        const char* name;
+        Int32 typeTag;
+        UInt32 rootIndex;
+    };
+
+    struct ListViewDesc
+    {
+        const char* name;
+        Int32 elementTag;
+    };
+}
+
+#endif
+[/runtime]

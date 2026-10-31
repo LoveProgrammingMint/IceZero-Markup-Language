@@ -1,0 +1,26 @@
+# MINT component mapping for IceZero Markup Language.
+# Code is MINT + CODE; IZML data protocol files are MINT + DATA.
+
+[[component]]
+path = "common/"
+license = ["LicenseRef-MINT-1.0", "LicenseRef-MINT-CODE-1.0"]
+
+[[component]]
+path = "parser/"
+license = ["LicenseRef-MINT-1.0", "LicenseRef-MINT-CODE-1.0"]
+
+[[component]]
+path = "compiler/"
+license = ["LicenseRef-MINT-1.0", "LicenseRef-MINT-CODE-1.0"]
+
+[[component]]
+path = "generator/"
+license = ["LicenseRef-MINT-1.0", "LicenseRef-MINT-CODE-1.0"]
+
+[[component]]
+path = "runtime/"
+license = ["LicenseRef-MINT-1.0", "LicenseRef-MINT-CODE-1.0"]
+
+[[component]]
+path = "data/izmlgen/"
+license = ["LicenseRef-MINT-1.0", "LicenseRef-MINT-DATA-1.0"]

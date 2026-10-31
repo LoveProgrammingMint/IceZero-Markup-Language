@@ -1,0 +1,449 @@
+@izmlgen-lang lang="csharp" version="1.0"
+
+[config]
+namespace = "Izml.Generated"
+runtime = "Izml.Runtime"
+runtime_binary = "izml-runtime.dll"
+ident_sep = "."
+escape_non_ascii = "0"
+keyword_prefix = "@"
+
+[types]
+bool = bool
+byte = byte
+sbyte = sbyte
+short = short
+ushort = ushort
+int = int
+uint = uint
+long = long
+ulong = ulong
+float = float
+double = double
+string = string
+
+[readers]
+bool = ReadBool
+byte = ReadU8
+sbyte = ReadI8
+short = ReadI16
+ushort = ReadU16
+int = ReadI32
+uint = ReadU32
+long = ReadI64
+ulong = ReadU64
+float = ReadF32
+double = ReadF64
+string = ReadString
+
+[keywords]
+abstract = ""
+as = ""
+base = ""
+break = ""
+case = ""
+catch = ""
+checked = ""
+class = ""
+const = ""
+continue = ""
+default = ""
+delegate = ""
+do = ""
+else = ""
+enum = ""
+event = ""
+explicit = ""
+extern = ""
+false = ""
+finally = ""
+fixed = ""
+for = ""
+foreach = ""
+goto = ""
+if = ""
+implicit = ""
+in = ""
+interface = ""
+internal = ""
+is = ""
+lock = ""
+namespace = ""
+new = ""
+null = ""
+object = ""
+operator = ""
+out = ""
+override = ""
+params = ""
+private = ""
+protected = ""
+public = ""
+readonly = ""
+ref = ""
+return = ""
+sealed = ""
+sizeof = ""
+stackalloc = ""
+static = ""
+struct = ""
+switch = ""
+this = ""
+throw = ""
+true = ""
+try = ""
+typeof = ""
+unchecked = ""
+unsafe = ""
+using = ""
+virtual = ""
+void = ""
+volatile = ""
+while = ""
+
+[macros]
+{% macro runtime_archive() %}global::{{ config.runtime }}.Archive{% endmacro %}
+{% macro runtime_error() %}global::{{ config.runtime }}.RuntimeError{% endmacro %}
+{% macro base_type(field) %}{% if field.kind == "list" %}List<{{ element_type(field) }}>{% elif field.kind == "define" %}{{ qual(field.type_name) }}{% elif field.kind == "enum" %}{{ field.type_name }}{% else %}{{ type(field.kind) }}{% endif %}{% endmacro %}
+{% macro element_type(field) %}{% if field.element_kind == "define" %}{{ qual(field.element_name) }}{% elif field.element_kind == "enum" %}{{ field.element_name }}{% else %}{{ type(field.element_kind) }}{% endif %}{% endmacro %}
+{% macro field_type(field) %}{% if field.optional %}{{ base_type(field) }}?{% else %}{{ base_type(field) }}{% endif %}{% endmacro %}
+{% macro initializer(field) %}{% if field.kind == "string" %} = ""{% elif field.kind == "list" %} = new List<{{ element_type(field) }}>(){% elif field.kind == "define" %} = new {{ qual(field.type_name) }}(){% endif %}{% endmacro %}
+{% macro emit_enum(e) %}
+    public enum {{ e.name }} : {{ type(e.base_kind) }}
+    {
+{% for m in e.members %}        {{ m.name }} = {{ m.value }},
+{% endfor %}    }
+
+{% endmacro %}
+{% macro emit_type(def, depth) %}
+{{ pad(depth * 4) }}public class {{ def.name }}{% if def.base_name %} : {{ qual(def.base_name) }}{% endif %}
+{{ pad(depth * 4) }}{
+{% for nested in def.nested_defines %}{{ emit_type(nested, depth + 1) }}
+{% endfor %}{% for field in def.fields %}{{ pad((depth + 1) * 4) }}public {{ field_type(field) }} {{ kw(field.name) }}{% if field.optional == false %}{{ initializer(field) }}{% endif %};
+{% endfor %}{{ pad(depth * 4) }}}
+
+{% endmacro %}
+{% macro emit_read_field(field, id) %}
+{% if field.optional %}{% set target = "temp" + id %}{% else %}{% set target = "value." + kw(field.name) %}{% endif %}
+{% if field.optional %}            {{ base_type(field) }} {{ target }}{{ initializer(field) }};
+{% endif %}
+{% if field.kind == "list" %}            uint count{{ id }} = reader.ReadU32();
+            {{ target }}.Clear();
+            for (uint i{{ id }} = 0; i{{ id }} < count{{ id }}; ++i{{ id }})
+            {
+{% if field.element_kind == "define" %}                var item{{ id }} = new {{ qual(field.element_name) }}();
+                Read_{{ ident(field.element_name) }}(reader, item{{ id }});
+                {{ target }}.Add(item{{ id }});
+{% elif field.element_kind == "enum" %}                {{ target }}.Add(({{ field.element_name }})reader.{{ reader(field.element_enum_base_kind) }}());
+{% else %}                {{ target }}.Add(reader.{{ reader(field.element_kind) }}());
+{% endif %}            }
+{% elif field.kind == "define" %}            Read_{{ ident(field.type_name) }}(reader, {{ target }});
+{% elif field.kind == "enum" %}            {{ target }} = ({{ field.type_name }})reader.{{ reader(field.enum_base_kind) }}();
+{% else %}            {{ target }} = reader.{{ reader(field.kind) }}();
+{% endif %}
+{% if field.optional %}            if (((bitmap{{ field.bitmap_byte }} >> {{ field.bitmap_bit }}) & 1) != 0)
+            {
+                value.{{ kw(field.name) }} = {{ target }};
+            }
+{% endif %}
+{% endmacro %}
+{% macro emit_read_func(def) %}
+        internal static void Read_{{ ident(def.qualified) }}({{ runtime_archive() }} reader, {{ qual(def.qualified) }} value)
+        {
+{% for b in range(def.bitmap_bytes) %}            byte bitmap{{ b }} = reader.ReadU8();
+{% endfor %}{% for field in def.layout %}{{ emit_read_field(field, loop.index0) }}{% endfor %}        }
+
+{% endmacro %}
+{% macro emit_read_funcs(def) %}
+{% for nested in def.nested_defines %}{{ emit_read_funcs(nested) }}{% endfor %}
+{{ emit_read_func(def) }}
+{% endmacro %}
+{% macro emit_tables() %}
+{% if program.instance_count == 0 %}        public static readonly IzmlInstanceDesc[] Instances = Array.Empty<IzmlInstanceDesc>();
+{% else %}        public static readonly IzmlInstanceDesc[] Instances = new IzmlInstanceDesc[]
+        {
+{% for instance in program.instances %}            new IzmlInstanceDesc { Name = "{{ escape(instance.name) }}", TypeTag = {{ instance.type_tag }}, RootIndex = {{ instance.root_index }} },
+{% endfor %}        };
+{% endif %}
+{% if program.list_view_count == 0 %}        public static readonly IzmlListViewDesc[] ListViews = Array.Empty<IzmlListViewDesc>();
+{% else %}        public static readonly IzmlListViewDesc[] ListViews = new IzmlListViewDesc[]
+        {
+{% for view in program.list_views %}            new IzmlListViewDesc { Name = "{{ escape(view.name) }}", ElementTag = {{ view.element_tag }} },
+{% endfor %}        };
+{% endif %}
+
+{% endmacro %}
+{% macro emit_load_roots() %}
+        public static List<object> LoadRoots({{ runtime_archive() }} archive)
+        {
+            var roots = new List<object>((int)archive.RootCount);
+            for (uint index = 0; index < archive.RootCount; ++index)
+            {
+                int tag = archive.ReadI32();
+                switch (tag)
+                {
+{% for def in program.top_level_defines %}                    case {{ def.type_tag }}:
+                    {
+                        var value = new {{ qual(def.qualified) }}();
+                        Read_{{ ident(def.qualified) }}(archive, value);
+                        roots.Add(value);
+                        break;
+                    }
+{% endfor %}                    default:
+                        throw new {{ runtime_error() }}("unknown typeTag");
+                }
+            }
+            return roots;
+        }
+{% endmacro %}
+[/macros]
+
+[template:main]
+file = "IzmlGenerated.cs"
+#nullable enable
+
+using System;
+using System.Collections.Generic;
+
+namespace {{ config.namespace }}
+{
+    public sealed class IzmlInstanceDesc
+    {
+        public string Name = "";
+        public int TypeTag;
+        public uint RootIndex;
+    }
+
+    public sealed class IzmlListViewDesc
+    {
+        public string Name = "";
+        public int ElementTag;
+    }
+
+{% for enum in program.enums %}{{ emit_enum(enum) }}{% endfor %}
+{% for define in program.top_level_defines %}{{ emit_type(define, 1) }}{% endfor %}
+    public static class IzmlGenerated
+    {
+{{ emit_tables() }}
+{% for define in program.top_level_defines %}{{ emit_read_funcs(define) }}{% endfor %}{{ emit_load_roots() }}
+    }
+}
+[/template]
+
+[runtime]
+file = "IzmlRuntime.cs"
+
+#nullable enable
+
+using System;
+using System.Runtime.InteropServices;
+using System.Text;
+
+namespace Izml.Runtime
+{
+    public sealed class RuntimeError : Exception
+    {
+        public RuntimeError(string message) : base(message)
+        {
+        }
+    }
+
+    public sealed class Archive : IDisposable
+    {
+        private IntPtr _handle;
+
+        private Archive(IntPtr handle)
+        {
+            _handle = handle;
+        }
+
+        public static Archive Open(string path)
+        {
+            IntPtr handle = NativeOpen(path);
+            if (handle == IntPtr.Zero)
+            {
+                throw new RuntimeError(LastError());
+            }
+            return new Archive(handle);
+        }
+
+        public ushort Version => NativeVersion(_handle);
+
+        public ushort MinVersion => NativeMinVersion(_handle);
+
+        public uint RootCount => NativeRootCount(_handle);
+
+        public byte ReadU8()
+        {
+            Ensure(NativeReadU8(_handle, out byte value));
+            return value;
+        }
+
+        public sbyte ReadI8()
+        {
+            Ensure(NativeReadI8(_handle, out sbyte value));
+            return value;
+        }
+
+        public ushort ReadU16()
+        {
+            Ensure(NativeReadU16(_handle, out ushort value));
+            return value;
+        }
+
+        public short ReadI16()
+        {
+            Ensure(NativeReadI16(_handle, out short value));
+            return value;
+        }
+
+        public uint ReadU32()
+        {
+            Ensure(NativeReadU32(_handle, out uint value));
+            return value;
+        }
+
+        public int ReadI32()
+        {
+            Ensure(NativeReadI32(_handle, out int value));
+            return value;
+        }
+
+        public ulong ReadU64()
+        {
+            Ensure(NativeReadU64(_handle, out ulong value));
+            return value;
+        }
+
+        public long ReadI64()
+        {
+            Ensure(NativeReadI64(_handle, out long value));
+            return value;
+        }
+
+        public float ReadF32()
+        {
+            Ensure(NativeReadF32(_handle, out float value));
+            return value;
+        }
+
+        public double ReadF64()
+        {
+            Ensure(NativeReadF64(_handle, out double value));
+            return value;
+        }
+
+        public bool ReadBool()
+        {
+            Ensure(NativeReadBool(_handle, out int value));
+            return value != 0;
+        }
+
+        public string ReadString()
+        {
+            Ensure(NativeReadString(_handle, out IntPtr data, out uint length));
+            if (length == 0)
+            {
+                return string.Empty;
+            }
+            byte[] bytes = new byte[length];
+            Marshal.Copy(data, bytes, 0, (int)length);
+            return Encoding.UTF8.GetString(bytes);
+        }
+
+        public byte[] ReadBytes()
+        {
+            Ensure(NativeReadBytes(_handle, out IntPtr data, out uint length));
+            if (length == 0)
+            {
+                return Array.Empty<byte>();
+            }
+            byte[] bytes = new byte[length];
+            Marshal.Copy(data, bytes, 0, (int)length);
+            return bytes;
+        }
+
+        public void Dispose()
+        {
+            if (_handle != IntPtr.Zero)
+            {
+                NativeClose(_handle);
+                _handle = IntPtr.Zero;
+            }
+        }
+
+        private static void Ensure(int ok)
+        {
+            if (ok == 0)
+            {
+                throw new RuntimeError(LastError());
+            }
+        }
+
+        private static string LastError()
+        {
+            IntPtr text = NativeLastError();
+            return text == IntPtr.Zero
+                ? "unknown IZML runtime error"
+                : (Marshal.PtrToStringUTF8(text) ?? "unknown IZML runtime error");
+        }
+
+        [DllImport("izml-runtime", EntryPoint = "izmlrt_open", CallingConvention = CallingConvention.Cdecl)]
+        private static extern IntPtr NativeOpen([MarshalAs(UnmanagedType.LPUTF8Str)] string path);
+
+        [DllImport("izml-runtime", EntryPoint = "izmlrt_close", CallingConvention = CallingConvention.Cdecl)]
+        private static extern void NativeClose(IntPtr archive);
+
+        [DllImport("izml-runtime", EntryPoint = "izmlrt_version", CallingConvention = CallingConvention.Cdecl)]
+        private static extern ushort NativeVersion(IntPtr archive);
+
+        [DllImport("izml-runtime", EntryPoint = "izmlrt_min_version", CallingConvention = CallingConvention.Cdecl)]
+        private static extern ushort NativeMinVersion(IntPtr archive);
+
+        [DllImport("izml-runtime", EntryPoint = "izmlrt_root_count", CallingConvention = CallingConvention.Cdecl)]
+        private static extern uint NativeRootCount(IntPtr archive);
+
+        [DllImport("izml-runtime", EntryPoint = "izmlrt_read_u8", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int NativeReadU8(IntPtr archive, out byte value);
+
+        [DllImport("izml-runtime", EntryPoint = "izmlrt_read_i8", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int NativeReadI8(IntPtr archive, out sbyte value);
+
+        [DllImport("izml-runtime", EntryPoint = "izmlrt_read_u16", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int NativeReadU16(IntPtr archive, out ushort value);
+
+        [DllImport("izml-runtime", EntryPoint = "izmlrt_read_i16", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int NativeReadI16(IntPtr archive, out short value);
+
+        [DllImport("izml-runtime", EntryPoint = "izmlrt_read_u32", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int NativeReadU32(IntPtr archive, out uint value);
+
+        [DllImport("izml-runtime", EntryPoint = "izmlrt_read_i32", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int NativeReadI32(IntPtr archive, out int value);
+
+        [DllImport("izml-runtime", EntryPoint = "izmlrt_read_u64", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int NativeReadU64(IntPtr archive, out ulong value);
+
+        [DllImport("izml-runtime", EntryPoint = "izmlrt_read_i64", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int NativeReadI64(IntPtr archive, out long value);
+
+        [DllImport("izml-runtime", EntryPoint = "izmlrt_read_f32", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int NativeReadF32(IntPtr archive, out float value);
+
+        [DllImport("izml-runtime", EntryPoint = "izmlrt_read_f64", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int NativeReadF64(IntPtr archive, out double value);
+
+        [DllImport("izml-runtime", EntryPoint = "izmlrt_read_bool", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int NativeReadBool(IntPtr archive, out int value);
+
+        [DllImport("izml-runtime", EntryPoint = "izmlrt_read_string", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int NativeReadString(IntPtr archive, out IntPtr data, out uint length);
+
+        [DllImport("izml-runtime", EntryPoint = "izmlrt_read_bytes", CallingConvention = CallingConvention.Cdecl)]
+        private static extern int NativeReadBytes(IntPtr archive, out IntPtr data, out uint length);
+
+        [DllImport("izml-runtime", EntryPoint = "izmlrt_last_error", CallingConvention = CallingConvention.Cdecl)]
+        private static extern IntPtr NativeLastError();
+    }
+}
+[/runtime]

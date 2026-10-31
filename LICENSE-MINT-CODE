@@ -1,0 +1,41 @@
+MINT CODE MODULE
+Version 1.0
+
+This module is incorporated by reference into the MINT License. It applies only when the Work is declared to be licensed under "MINT + CODE". Capitalized terms have the meanings given in the MINT License.
+
+1. Scope
+
+This module applies to Source Code files of the Work.
+
+2. File-Level Reciprocity
+
+If You modify any file of the Work, You must license the modified file under this module, and You must make the modified file available to recipients under the terms of this module.
+
+This obligation applies on a per-file basis. It does not extend to files that are not derived from the Work and are distributed alongside it.
+
+3. Distribution
+
+When You Distribute the Work or any Modified Version, You must:
+(a) include a copy of the MINT License, this module, and all applicable notices;
+(b) retain all copyright notices in the Source Code files.
+
+4. No Absorption
+
+This module does not absorb, replace, or reduce any obligation arising under another MINT module applicable to the same distribution. Where multiple modules apply, their obligations are cumulative.
+
+5. Official API Designation
+
+The copyright holder may designate an Official API for the Work by publishing a designation file named "MINT-OFFICIAL-API". The file may be placed in the root of the Work's repository, in the root of another repository, or at a stable URL. The file must state its own location and list the interfaces, modules, or endpoints that constitute the Official API.
+
+The designation is effective only if all of the following conditions are met at the time the Work is Distributed:
+(a) the designation file is reachable at the stated location;
+(b) the file conforms to the schema published with this License;
+(c) the interfaces listed in the file correspond to interfaces actually provided by the Work.
+
+If any condition is not met, the designation is ineffective. An ineffective designation does not affect the validity of this module; it only means that no Official API exists for the purposes of the PUBLIC module.
+
+The Official API definition in the PUBLIC module refers to the designation made under this section. If the Work is not licensed under this module, the Official API must be identified in the official documentation of the Work.
+
+6. Interaction with the PUBLIC Module
+
+Where the PUBLIC module is also incorporated, the scope exclusion set out in that module applies to the access behavior described therein. This module resumes full effect once that exclusion lapses.

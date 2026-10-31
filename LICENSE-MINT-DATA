@@ -1,0 +1,30 @@
+MINT DATA MODULE
+Version 1.0
+
+This module is incorporated by reference into the MINT License. It applies only when the Work is declared to be licensed under "MINT + DATA". Capitalized terms have the meanings given in the MINT License.
+
+1. Scope
+
+This module applies to datasets, databases, and data files of the Work. It does not apply to personal data or to data the Licensor is not entitled to license.
+
+2. Source Notice
+
+When You Distribute the Work or a derivative dataset, You must:
+(a) identify the Licensor and the MINT modules applied;
+(b) retain all notices attached to the Work.
+
+3. Share-Alike for Derivative Datasets
+
+If You create a derivative dataset and Distribute it, You must license the derivative dataset under this module.
+
+This obligation does not apply to:
+(a) the output of processing the Work with software, where that output is not a substantial extraction of the Work;
+(b) a collection that includes the Work alongside independent datasets, provided the Work is not modified.
+
+4. Schema and Content
+
+The database schema of the Work may be licensed under the CODE or DESIGN module where declared. This module governs the data content itself. Where both apply, the obligations are cumulative.
+
+5. Personal Data
+
+This module does not grant rights over personal data. If the Work contains personal data, You are responsible for obtaining any additional legal basis required by applicable law.

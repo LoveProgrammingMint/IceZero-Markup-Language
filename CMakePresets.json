@@ -1,0 +1,33 @@
+{
+  "version": 6,
+  "configurePresets": [
+    {
+      "name": "clang-release",
+      "displayName": "Clang Release x64",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/build/clang-release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "CMAKE_C_COMPILER": "D:/Clang/bin/clang-cl.exe",
+        "CMAKE_CXX_COMPILER": "D:/Clang/bin/clang-cl.exe",
+        "CMAKE_LINKER": "D:/Clang/bin/lld-link.exe",
+        "CMAKE_AR": "D:/Clang/bin/llvm-lib.exe",
+        "CMAKE_MAKE_PROGRAM": "D:/Clang/bin/ninja.exe",
+        "CMAKE_MSVC_RUNTIME_LIBRARY": "MultiThreadedDLL"
+      }
+    },
+    {
+      "name": "clang-debug",
+      "displayName": "Clang Debug x64",
+      "inherits": "clang-release",
+      "binaryDir": "${sourceDir}/build/clang-debug",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    }
+  ],
+  "buildPresets": [
+    { "name": "clang-release", "configurePreset": "clang-release" },
+    { "name": "clang-debug", "configurePreset": "clang-debug" }
+  ]
+}
