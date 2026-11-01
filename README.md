@@ -41,6 +41,10 @@ cmake --preset clang-release
 cmake --build --preset clang-release
 ```
 
+The Release preset enables `-O3`, `/Ob3`, `/OPT:REF`, `/OPT:ICF` and ThinLTO
+(`-flto=thin`, consumed by `lld-link`). Disable them with
+`-DIZML_AGGRESSIVE_OPTIMIZATION=OFF` or `-DIZML_ENABLE_THIN_LTO=OFF`.
+
 Artifacts land in `build/clang-release/bin/`:
 
 ```text
